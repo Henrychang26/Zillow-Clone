@@ -1,31 +1,57 @@
-// We require the Hardhat Runtime Environment explicitly here. This is optional
-// but useful for running the script in a standalone fashion through `node <script>`.
-//
-// You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
-// will compile your contracts, add the Hardhat Runtime Environment's members to the
-// global scope, and execute the script.
-const hre = require("hardhat");
+const { ethers } = require("hardhat")
+const hre = require("hardhat")
 
-async function main() {
-  const currentTimestampInSeconds = Math.round(Date.now() / 1000);
-  const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-  const unlockTime = currentTimestampInSeconds + ONE_YEAR_IN_SECS;
-
-  const lockedAmount = hre.ethers.utils.parseEther("1");
-
-  const Lock = await hre.ethers.getContractFactory("Lock");
-  const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
-
-  await lock.deployed();
-
-  console.log(
-    `Lock with 1 ETH and unlock timestamp ${unlockTime} deployed to ${lock.address}`
-  );
+const tokens = (n) => {
+    return ethers.utils.parseUnits(n.toString(), "ether")
 }
 
-// We recommend this pattern to be able to use async/await everywhere
-// and properly handle errors.
+async function main() {
+    ;[buyer, seller, inspector, lender] = await ethers.getSigners()
+
+    const RealEstate = await ethers.getContractFactory("RealEstate")
+    const realEstate = await RealEstate.deploy()
+    await realEstate.deployed()
+    console.log(`Deployed Real Estate Contract at: ${realEstate.address}`)
+    console.log(`Minting 3 properties...`)
+
+    for (let i = 0; i < 3; i++) {
+        const transaction = await realEstate
+            .connect(seller)
+            .mint(
+                `https://ipfs.io/ipfs/QmQUozrHLAusXDxrvsESJ3PYB3rUeUuBAvVWw6nop2uu7c/${i + 1}.png`
+            )
+        await transaction.wait()
+    }
+    const Escrow = await ethers.getContractFactory("Escrow")
+    const escrow = await Escrow.deploy(
+        realEstate.address,
+        seller.address,
+        inspector.address,
+        lender.address
+    )
+    await escrow.deployed()
+
+    console.log(`Escrow contract deployed at: ${escrow.address}`)
+
+    for (let i = 0; i < 3; i++) {
+        let transaction = await realEstate.connect(seller).approve(escrow.address, i + 1)
+        await transaction.wait()
+    }
+
+    //Listing properties...
+    transaction = await escrow.connect(seller).list(1, buyer.address, tokens(20), tokens(10))
+    await transaction.wait()
+
+    transaction = await escrow.connect(seller).list(2, buyer.address, tokens(15), tokens(5))
+    await transaction.wait()
+
+    transaction = await escrow.connect(seller).list(3, buyer.address, tokens(10), tokens(5))
+    await transaction.wait()
+
+    console.log("Finished.")
+}
+
 main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+    console.error(error)
+    process.exitCode = 1
+})
